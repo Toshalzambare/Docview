@@ -2,28 +2,82 @@
   "expo": {
     "name": "DocView",
     "slug": "DocView",
+    "scheme": "docview",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0D0D0D"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.docview.app",
+      "infoPlist": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "All Documents",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.data",
+              "public.content",
+              "public.item",
+              "public.pdf",
+              "public.image",
+              "public.plain-text",
+              "public.json",
+              "public.xml",
+              "public.html",
+              "public.comma-separated-values-text",
+              "org.openxmlformats.wordprocessingml.document",
+              "org.openxmlformats.spreadsheetml.sheet",
+              "org.openxmlformats.presentationml.presentation",
+              "com.microsoft.word.doc",
+              "com.microsoft.excel.xls",
+              "com.microsoft.powerpoint.ppt"
+            ]
+          }
+        ]
+      }
     },
     "android": {
+      "package": "com.docview.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D0D0D"
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": ["DEFAULT", "BROWSABLE"],
+          "data": [
+            { "mimeType": "*/*" }
+          ]
+        },
+        {
+          "action": "SEND",
+          "category": ["DEFAULT"],
+          "data": [
+            { "mimeType": "*/*" }
+          ]
+        }
+      ],
+      "permissions": [
+        "READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ]
+    ]
   }
 }
