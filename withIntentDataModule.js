@@ -27,32 +27,32 @@ class IntentDataModule(reactContext: ReactApplicationContext) : ReactContextBase
     @ReactMethod
     fun getIntentData(promise: Promise) {
         try {
-            val activity = currentActivity
+            val activity = getCurrentActivity()
             if (activity == null) {
                 Log.w(TAG, "getIntentData: currentActivity is NULL")
                 promise.resolve(null)
                 return
             }
 
-            val intent = activity.intent
+            val intent = activity.getIntent()
             if (intent == null) {
                 Log.w(TAG, "getIntentData: intent is NULL")
                 promise.resolve(null)
                 return
             }
 
-            val action = intent.action
-            val data = intent.data
-            val type = intent.type
-            val categories = intent.categories
-            val extras = intent.extras
+            val action = intent.getAction()
+            val data = intent.getData()
+            val type = intent.getType()
+            val categories = intent.getCategories()
+            val extras = intent.getExtras()
 
             Log.d(TAG, "========== INTENT DUMP ==========")
             Log.d(TAG, "  action     = $action")
             Log.d(TAG, "  data       = $data")
             Log.d(TAG, "  type       = $type")
             Log.d(TAG, "  categories = $categories")
-            Log.d(TAG, "  flags      = 0x\${Integer.toHexString(intent.flags)}")
+            Log.d(TAG, "  flags      = 0x\${Integer.toHexString(intent.getFlags())}")
             if (extras != null) {
                 for (key in extras.keySet()) {
                     Log.d(TAG, "  extra[$key] = \${extras.get(key)}")
@@ -99,11 +99,11 @@ class IntentDataModule(reactContext: ReactApplicationContext) : ReactContextBase
     @ReactMethod
     fun clearIntentData() {
         try {
-            val activity = currentActivity ?: return
-            val intent = activity.intent ?: return
-            Log.d(TAG, "clearIntentData: clearing intent data (was action=\${intent.action}, data=\${intent.data})")
-            intent.data = null
-            intent.action = Intent.ACTION_MAIN
+            val activity = getCurrentActivity() ?: return
+            val intent = activity.getIntent() ?: return
+            Log.d(TAG, "clearIntentData: clearing intent data (was action=\${intent.getAction()}, data=\${intent.getData()})")
+            intent.setData(null)
+            intent.setAction(Intent.ACTION_MAIN)
         } catch (e: Exception) {
             Log.e(TAG, "clearIntentData EXCEPTION: \${e.message}", e)
         }
