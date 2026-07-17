@@ -1,9 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { StatusBar, Platform } from 'react-native';
+import { StatusBar, Platform, NativeModules, AppState } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import * as FileSystem from 'expo-file-system';
-import * as Linking from 'expo-linking';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import HomeScreen from './src/screens/HomeScreen';
@@ -136,7 +135,7 @@ function AppInner() {
   };
 
   // Handle a file URI from ACTION_VIEW intent ("Open with" from file managers, WhatsApp, etc.)
-  const handleIncomingFileUrl = async (url) => {
+  const handleIncomingFileUrl = async (url, mimeType) => {
     if (!url) return;
 
     // Skip our own scheme URLs (deep links, not file intents)
@@ -156,7 +155,7 @@ function AppInner() {
         const pathSegments = url.split('/');
         const lastSegment = pathSegments.pop() || '';
         const decoded = decodeURIComponent(lastSegment);
-        // Only use it as a name if it looks like a filename (has a dot extension or is non-empty)
+        // Only use it as a name if it looks like a filename (non-empty, not a query param)
         if (decoded && decoded.length > 0 && !decoded.startsWith('?')) {
           fileName = decoded;
         }
@@ -167,6 +166,11 @@ function AppInner() {
       // If no good filename, use a generic one
       if (!fileName || fileName.length === 0) {
         fileName = 'Opened File';
+      }
+
+      // If no extension in the filename, try to add one from the MIME type
+      if (!fileName.includes('.') && mimeType && mimeToExt[mimeType]) {
+        fileName = fileName + '.' + mimeToExt[mimeType];
       }
 
       // Resolve the file (copy from content:// if needed, detect type from content)
@@ -240,33 +244,55 @@ function AppInner() {
   }, [hasShareIntent, shareIntent]);
 
   // Handle ACTION_VIEW intents ("Open with" from file managers, WhatsApp open, etc.)
+  // Uses native IntentDataModule to read intent.data directly from the Android activity
   useEffect(() => {
-    // Cold start: check if the app was launched with a file URL
-    const checkInitialUrl = async () => {
+    const { IntentDataModule } = NativeModules;
+
+    // Check for intent data (works for both cold-start and warm-start)
+    const checkIntentData = async () => {
       try {
-        const initialUrl = await Linking.getInitialURL();
-        if (initialUrl) {
-          // Small delay to let navigation mount and share-intent process first
-          setTimeout(() => {
-            handleIncomingFileUrl(initialUrl);
-          }, 500);
+        if (!IntentDataModule) {
+          console.log('IntentDataModule not available (non-Android or module not registered)');
+          return;
+        }
+
+        const intentData = await IntentDataModule.getIntentData();
+        if (intentData && intentData.uri) {
+          const uri = intentData.uri;
+          const mimeType = intentData.type || '';
+
+          // Prevent double-processing
+          if (lastHandledUrl.current === uri) return;
+
+          // Handle the incoming file URL
+          await handleIncomingFileUrl(uri, mimeType);
+
+          // Clear the intent data so it won't be re-processed
+          IntentDataModule.clearIntentData();
         }
       } catch (err) {
-        console.log('Error getting initial URL:', err);
+        console.log('Error reading intent data:', err);
       }
     };
 
-    checkInitialUrl();
+    // Cold start: check on mount with a small delay to let navigation & share-intent settle
+    const timer = setTimeout(() => {
+      checkIntentData();
+    }, 600);
 
-    // Warm start: app is already running and receives a new file intent
-    const subscription = Linking.addEventListener('url', (event) => {
-      if (event.url) {
-        handleIncomingFileUrl(event.url);
+    // Warm start: check whenever app comes to foreground (singleTask onNewIntent updates the intent)
+    const appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        // Small delay to ensure the new intent is set
+        setTimeout(() => {
+          checkIntentData();
+        }, 300);
       }
     });
 
     return () => {
-      subscription?.remove();
+      clearTimeout(timer);
+      appStateSubscription?.remove();
     };
   }, []);
 
