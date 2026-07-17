@@ -129,11 +129,6 @@
         }
       ],
       "./withIntentDataModule.js"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "fff910c3-9e73-4353-b89f-948f565be724"
-      }
-    }
+    ]
   }
 }
