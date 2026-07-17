@@ -580,5 +580,8 @@ After the cloud build completes:
 ---
 
 *Last updated: June 2026*
+eas logout
+eas login
 
 eas build -p android --profile preview
+adb logcat -s DocView.MainActivity DocView.IntentModule ReactNativeJS

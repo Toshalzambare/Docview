@@ -56,18 +56,42 @@
             "BROWSABLE"
           ],
           "data": [
-            { "scheme": "file" },
-            { "scheme": "content" },
-            { "mimeType": "application/pdf" },
-            { "mimeType": "application/msword" },
-            { "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-            { "mimeType": "application/vnd.ms-excel" },
-            { "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-            { "mimeType": "application/vnd.ms-powerpoint" },
-            { "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
-            { "mimeType": "text/plain" },
-            { "mimeType": "text/csv" },
-            { "mimeType": "*/*" }
+            {
+              "scheme": "file"
+            },
+            {
+              "scheme": "content"
+            },
+            {
+              "mimeType": "application/pdf"
+            },
+            {
+              "mimeType": "application/msword"
+            },
+            {
+              "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            },
+            {
+              "mimeType": "application/vnd.ms-excel"
+            },
+            {
+              "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            },
+            {
+              "mimeType": "application/vnd.ms-powerpoint"
+            },
+            {
+              "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            },
+            {
+              "mimeType": "text/plain"
+            },
+            {
+              "mimeType": "text/csv"
+            },
+            {
+              "mimeType": "*/*"
+            }
           ]
         },
         {
@@ -76,18 +100,42 @@
             "DEFAULT"
           ],
           "data": [
-            { "scheme": "file" },
-            { "scheme": "content" },
-            { "mimeType": "application/pdf" },
-            { "mimeType": "application/msword" },
-            { "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-            { "mimeType": "application/vnd.ms-excel" },
-            { "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-            { "mimeType": "application/vnd.ms-powerpoint" },
-            { "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
-            { "mimeType": "text/plain" },
-            { "mimeType": "text/csv" },
-            { "mimeType": "*/*" }
+            {
+              "scheme": "file"
+            },
+            {
+              "scheme": "content"
+            },
+            {
+              "mimeType": "application/pdf"
+            },
+            {
+              "mimeType": "application/msword"
+            },
+            {
+              "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            },
+            {
+              "mimeType": "application/vnd.ms-excel"
+            },
+            {
+              "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            },
+            {
+              "mimeType": "application/vnd.ms-powerpoint"
+            },
+            {
+              "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            },
+            {
+              "mimeType": "text/plain"
+            },
+            {
+              "mimeType": "text/csv"
+            },
+            {
+              "mimeType": "*/*"
+            }
           ]
         }
       ],
@@ -129,6 +177,11 @@
         }
       ],
       "./withIntentDataModule.js"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2eb64f69-7947-4789-9934-0dbad09c2ba4"
+      }
+    }
   }
 }
