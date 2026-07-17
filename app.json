@@ -127,7 +127,8 @@
             "application/*"
           ]
         }
-      ]
+      ],
+      "./withIntentDataModule.js"
     ],
     "extra": {
       "eas": {
