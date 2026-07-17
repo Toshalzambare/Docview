@@ -3,6 +3,7 @@ package com.docview.app
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -12,12 +13,32 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
+
+  companion object {
+    private const val TAG = "DocView.MainActivity"
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
+
+    // Log the intent that launched the activity
+    val intent = getIntent()
+    Log.i(TAG, "======= onCreate =======")
+    Log.i(TAG, "  action     = ${intent?.action}")
+    Log.i(TAG, "  data       = ${intent?.data}")
+    Log.i(TAG, "  type       = ${intent?.type}")
+    Log.i(TAG, "  categories = ${intent?.categories}")
+    Log.i(TAG, "  flags      = 0x${Integer.toHexString(intent?.flags ?: 0)}")
+    if (intent?.extras != null) {
+      for (key in intent.extras!!.keySet()) {
+        Log.i(TAG, "  extra[$key] = ${intent.extras!!.get(key)}")
+      }
+    }
+    Log.i(TAG, "========================")
   }
 
   /**
@@ -25,6 +46,18 @@ class MainActivity : ReactActivity() {
    * fires when the app is already running and receives an ACTION_VIEW file intent.
    */
   override fun onNewIntent(intent: Intent) {
+    Log.i(TAG, "======= onNewIntent =======")
+    Log.i(TAG, "  action     = ${intent.action}")
+    Log.i(TAG, "  data       = ${intent.data}")
+    Log.i(TAG, "  type       = ${intent.type}")
+    Log.i(TAG, "  categories = ${intent.categories}")
+    if (intent.extras != null) {
+      for (key in intent.extras!!.keySet()) {
+        Log.i(TAG, "  extra[$key] = ${intent.extras!!.get(key)}")
+      }
+    }
+    Log.i(TAG, "============================")
+
     super.onNewIntent(intent)
     setIntent(intent)
   }

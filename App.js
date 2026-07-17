@@ -127,26 +127,44 @@ function AppInner() {
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
 
   const navigateToFile = (file) => {
+    console.log('[DocView] navigateToFile called:', JSON.stringify({ name: file.name, uri: file.uri?.substring(0, 80) }));
     if (navigationRef.current?.isReady()) {
+      console.log('[DocView] Navigation is ready → navigating to Viewer');
       navigationRef.current.navigate('Viewer', { file });
     } else {
+      console.log('[DocView] Navigation NOT ready → queuing as pendingFile');
       pendingFile.current = file;
     }
   };
 
   // Handle a file URI from ACTION_VIEW intent ("Open with" from file managers, WhatsApp, etc.)
   const handleIncomingFileUrl = async (url, mimeType) => {
-    if (!url) return;
+    console.log('[DocView] handleIncomingFileUrl called with:', { url: url?.substring(0, 100), mimeType });
+
+    if (!url) {
+      console.log('[DocView] ❌ URL is null/empty, skipping');
+      return;
+    }
 
     // Skip our own scheme URLs (deep links, not file intents)
-    if (url.startsWith('docview://') || url.startsWith('exp+docview://')) return;
+    if (url.startsWith('docview://') || url.startsWith('exp+docview://')) {
+      console.log('[DocView] ❌ Skipping own scheme URL:', url.substring(0, 50));
+      return;
+    }
 
     // Only handle file:// and content:// URIs (these are actual file intents)
-    if (!url.startsWith('file://') && !url.startsWith('content://')) return;
+    if (!url.startsWith('file://') && !url.startsWith('content://')) {
+      console.log('[DocView] ❌ Not a file/content URI, skipping. Scheme:', url.split('://')[0]);
+      return;
+    }
 
     // Prevent double-processing the same URL
-    if (lastHandledUrl.current === url) return;
+    if (lastHandledUrl.current === url) {
+      console.log('[DocView] ❌ Already handled this URL, skipping (dedup)');
+      return;
+    }
     lastHandledUrl.current = url;
+    console.log('[DocView] ✅ Proceeding to handle file URI');
 
     try {
       // Try to extract a filename from the URI path
@@ -155,26 +173,30 @@ function AppInner() {
         const pathSegments = url.split('/');
         const lastSegment = pathSegments.pop() || '';
         const decoded = decodeURIComponent(lastSegment);
-        // Only use it as a name if it looks like a filename (non-empty, not a query param)
         if (decoded && decoded.length > 0 && !decoded.startsWith('?')) {
           fileName = decoded;
         }
+        console.log('[DocView] Extracted filename from URI:', fileName);
       } catch (e) {
-        console.log('Could not extract filename from URI:', e.message);
+        console.log('[DocView] Could not extract filename from URI:', e.message);
       }
 
       // If no good filename, use a generic one
       if (!fileName || fileName.length === 0) {
         fileName = 'Opened File';
+        console.log('[DocView] No filename found, using generic:', fileName);
       }
 
       // If no extension in the filename, try to add one from the MIME type
       if (!fileName.includes('.') && mimeType && mimeToExt[mimeType]) {
         fileName = fileName + '.' + mimeToExt[mimeType];
+        console.log('[DocView] Added extension from MIME type:', fileName);
       }
 
+      console.log('[DocView] Resolving file for viewer... (fileName=' + fileName + ')');
       // Resolve the file (copy from content:// if needed, detect type from content)
       const resolved = await resolveFileForViewer(url, fileName);
+      console.log('[DocView] ✅ Resolved:', JSON.stringify({ uri: resolved.uri?.substring(0, 80), name: resolved.name }));
 
       navigateToFile({
         uri: resolved.uri,
@@ -182,42 +204,41 @@ function AppInner() {
         openedAt: new Date().toISOString(),
       });
     } catch (err) {
-      console.log('Error handling incoming file URL:', err);
+      console.log('[DocView] ❌ Error handling incoming file URL:', err.message, err);
     }
   };
 
   // Handle share intent from WhatsApp / file managers / other apps (ACTION_SEND)
   useEffect(() => {
+    console.log('[DocView] Share intent check: hasShareIntent=' + hasShareIntent + ', shareIntent=' + (shareIntent ? 'present' : 'null'));
     if (!hasShareIntent || !shareIntent) return;
 
     const processShareIntent = async () => {
       try {
-        // shareIntent.files is an array of shared files
+        console.log('[DocView] Processing share intent:', JSON.stringify(shareIntent).substring(0, 200));
         const files = shareIntent.files;
         if (files && files.length > 0) {
           const sharedFile = files[0];
           const fileUri = sharedFile.path || sharedFile.uri;
           const fileName = sharedFile.fileName || sharedFile.name;
           const mimeType = sharedFile.mimeType || sharedFile.type;
+          console.log('[DocView] Share intent file:', { fileUri: fileUri?.substring(0, 80), fileName, mimeType });
 
           if (fileUri) {
             let resolvedName = fileName;
 
-            // If no name, try to extract from URI
             if (!resolvedName) {
               resolvedName = decodeURIComponent(fileUri.split('/').pop() || 'Shared File');
             }
 
-            // If no extension in name, try from MIME type
             if (resolvedName && !resolvedName.includes('.') && mimeType && mimeToExt[mimeType]) {
               resolvedName = resolvedName + '.' + mimeToExt[mimeType];
             }
 
-            // Mark this URL as handled so the Linking handler doesn't double-process it
             lastHandledUrl.current = fileUri;
 
-            // Resolve the file (copy from content:// if needed, detect type)
             const resolved = await resolveFileForViewer(fileUri, resolvedName);
+            console.log('[DocView] ✅ Share intent resolved:', resolved.name);
 
             navigateToFile({
               uri: resolved.uri,
@@ -226,15 +247,17 @@ function AppInner() {
             });
           }
         } else if (shareIntent.text) {
-          // Text/URL sharing — just open as text
+          console.log('[DocView] Share intent is text:', shareIntent.text?.substring(0, 50));
           navigateToFile({
             uri: shareIntent.text,
             name: 'Shared Text.txt',
             openedAt: new Date().toISOString(),
           });
+        } else {
+          console.log('[DocView] ❌ Share intent has no files and no text');
         }
       } catch (err) {
-        console.log('Error processing share intent:', err);
+        console.log('[DocView] ❌ Error processing share intent:', err.message, err);
       } finally {
         resetShareIntent();
       }
@@ -247,45 +270,58 @@ function AppInner() {
   // Uses native IntentDataModule to read intent.data directly from the Android activity
   useEffect(() => {
     const { IntentDataModule } = NativeModules;
+    console.log('[DocView] IntentDataModule available:', !!IntentDataModule);
 
     // Check for intent data (works for both cold-start and warm-start)
-    const checkIntentData = async () => {
+    const checkIntentData = async (trigger) => {
       try {
         if (!IntentDataModule) {
-          console.log('IntentDataModule not available (non-Android or module not registered)');
+          console.log('[DocView] ❌ IntentDataModule is NOT available in NativeModules');
+          console.log('[DocView] Available NativeModules:', Object.keys(NativeModules).join(', '));
           return;
         }
 
+        console.log('[DocView] Calling IntentDataModule.getIntentData() (trigger: ' + trigger + ')...');
         const intentData = await IntentDataModule.getIntentData();
+        console.log('[DocView] IntentDataModule result:', intentData ? JSON.stringify(intentData) : 'null');
+
         if (intentData && intentData.uri) {
           const uri = intentData.uri;
           const mimeType = intentData.type || '';
+          console.log('[DocView] ✅ Got intent data: uri=' + uri.substring(0, 80) + ', type=' + mimeType);
 
           // Prevent double-processing
-          if (lastHandledUrl.current === uri) return;
+          if (lastHandledUrl.current === uri) {
+            console.log('[DocView] ❌ Already handled this URI (dedup), skipping');
+            return;
+          }
 
           // Handle the incoming file URL
           await handleIncomingFileUrl(uri, mimeType);
 
           // Clear the intent data so it won't be re-processed
           IntentDataModule.clearIntentData();
+          console.log('[DocView] Intent data cleared after handling');
+        } else {
+          console.log('[DocView] No intent data found (normal app launch or already cleared)');
         }
       } catch (err) {
-        console.log('Error reading intent data:', err);
+        console.log('[DocView] ❌ Error reading intent data:', err.message, err);
       }
     };
 
     // Cold start: check on mount with a small delay to let navigation & share-intent settle
+    console.log('[DocView] Setting up cold-start intent check (600ms delay)...');
     const timer = setTimeout(() => {
-      checkIntentData();
+      checkIntentData('cold-start');
     }, 600);
 
     // Warm start: check whenever app comes to foreground (singleTask onNewIntent updates the intent)
     const appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      console.log('[DocView] AppState changed to:', nextAppState);
       if (nextAppState === 'active') {
-        // Small delay to ensure the new intent is set
         setTimeout(() => {
-          checkIntentData();
+          checkIntentData('warm-start-appstate');
         }, 300);
       }
     });
@@ -297,9 +333,11 @@ function AppInner() {
   }, []);
 
   const onNavigationReady = () => {
+    console.log('[DocView] onNavigationReady fired, pendingFile:', pendingFile.current ? pendingFile.current.name : 'none');
     if (pendingFile.current) {
       const file = pendingFile.current;
       pendingFile.current = null;
+      console.log('[DocView] ✅ Processing pending file:', file.name);
       setTimeout(() => {
         navigationRef.current?.navigate('Viewer', { file });
       }, 100);
