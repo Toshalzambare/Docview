@@ -145,19 +145,39 @@ function convertDocxXmlToHtml(xml, images, hyperlinkRels) {
   // Match paragraphs and tables in order
   const blockRegex = /<w_tbl>[\s\S]*?<\/w_tbl>|<w_p[ >][\s\S]*?<\/w_p>/g;
   let match;
+  let inList = false;
+
   while ((match = blockRegex.exec(bodyContent)) !== null) {
     const block = match[0];
+    
+    // Close list if moving to something else
+    if (inList && (!block.startsWith('<w_p') || getParagraphStyle(block).tag !== 'li')) {
+      html += '</ul>';
+      inList = false;
+    }
+
     if (block.startsWith('<w_tbl>')) {
       html += convertTable(block, images, hyperlinkRels);
     } else {
       const { tag, style } = getParagraphStyle(block);
       const content = extractParagraphContent(block, images, hyperlinkRels);
-      if (content.trim() || tag === 'br') {
+      
+      if (tag === 'li') {
+        if (!inList) {
+          html += '<ul>';
+          inList = true;
+        }
+        html += `<li${style}>${content || '&nbsp;'}</li>`;
+      } else if (content.trim() || tag === 'br') {
         html += `<${tag}${style}>${content}</${tag}>`;
       } else {
         html += '<br/>';
       }
     }
+  }
+
+  if (inList) {
+    html += '</ul>';
   }
 
   return html || '<p style="color:#A0A0B8;">Document appears to be empty.</p>';

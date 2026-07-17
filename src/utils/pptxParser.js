@@ -4,11 +4,18 @@ import JSZip from 'jszip';
  * Parse PPTX file from base64 string and convert to HTML slides
  * PPTX files are ZIP archives containing XML files.
  * Slides are in ppt/slides/slide1.xml, slide2.xml, etc.
+ *
+ * Renders each slide as a visual card with proper layout,
+ * background color, and text positioning similar to how
+ * mobile PowerPoint viewers display slides.
  */
 export async function parsePptx(base64Data) {
   try {
     // Clean base64 data - remove data URI prefix if present
     let cleanBase64 = base64Data;
+    if (!cleanBase64 || typeof cleanBase64 !== 'string') {
+      throw new Error('Invalid input: base64 data is empty or not a string');
+    }
     const commaIdx = cleanBase64.indexOf(',');
     if (commaIdx !== -1 && commaIdx < 100) {
       cleanBase64 = cleanBase64.substring(commaIdx + 1);
@@ -16,7 +23,6 @@ export async function parsePptx(base64Data) {
 
     // Clean whitespace/newlines from base64
     cleanBase64 = cleanBase64.replace(/[\s\r\n]/g, '');
-    console.log('PPTX clean base64 length:', cleanBase64.length, 'first 20:', cleanBase64.substring(0, 20));
 
     const zip = await JSZip.loadAsync(cleanBase64, { base64: true });
 
@@ -26,13 +32,11 @@ export async function parsePptx(base64Data) {
     zip.forEach((path, entry) => {
       allPaths.push(path);
       // Match slide files with flexible path matching
-      const match = path.match(/ppt[\/\\]slides[\/\\]slide(\d+)\.xml$/i);
+      const match = path.match(/ppt[\\/]slides[\\/]slide(\d+)\.xml$/i);
       if (match) {
         slideFiles.push({ path, number: parseInt(match[1]), entry });
       }
     });
-
-    console.log('PPTX all paths:', allPaths.join(', '));
 
     // Sort by slide number
     slideFiles.sort((a, b) => a.number - b.number);
@@ -50,7 +54,7 @@ export async function parsePptx(base64Data) {
       slideFiles.sort((a, b) => a.number - b.number);
 
       if (slideFiles.length === 0) {
-        throw new Error(`No slides found in presentation. Files: ${allPaths.filter(p => p.includes('slide')).join(', ') || 'none'}`);
+        throw new Error('No slides found in presentation');
       }
     }
 
@@ -58,58 +62,79 @@ export async function parsePptx(base64Data) {
     const images = {};
     const slideHyperlinks = {};
     for (const slideFile of slideFiles) {
-      const relsPath = `ppt/slides/_rels/slide${slideFile.number}.xml.rels`;
-      const relsFile = zip.file(relsPath);
-      if (relsFile) {
-        const relsXml = await relsFile.async('text');
-        const relMatches = relsXml.match(/<Relationship[^>]*>/g) || [];
-        for (const rel of relMatches) {
-          const idMatch = rel.match(/Id="([^"]+)"/);
-          const targetMatch = rel.match(/Target="([^"]+)"/);
-          const typeMatch = rel.match(/Type="[^"]*\/(\w+)"/);
-          if (!idMatch || !targetMatch || !typeMatch) continue;
+      try {
+        const relsPath = `ppt/slides/_rels/slide${slideFile.number}.xml.rels`;
+        const relsFile = zip.file(relsPath);
+        if (relsFile) {
+          const relsXml = await relsFile.async('text');
+          const relMatches = (relsXml || '').match(/<Relationship[^>]*>/g) || [];
+          for (const rel of relMatches) {
+            const idMatch = rel.match(/Id="([^"]+)"/);
+            const targetMatch = rel.match(/Target="([^"]+)"/);
+            const typeMatch = rel.match(/Type="[^"]*\/(\w+)"/);
+            if (!idMatch || !targetMatch || !typeMatch) continue;
 
-          if (typeMatch[1] === 'image') {
-            const target = targetMatch[1];
-            const imagePath = target.startsWith('/')
-              ? target.slice(1)
-              : `ppt/slides/${target}`.replace('/slides/../', '/');
-            const normalizedPath = imagePath.replace(/\.\.\//g, '').replace('ppt/ppt/', 'ppt/');
-            let imageFile = zip.file(normalizedPath);
-            if (!imageFile) {
-              const altPath = `ppt/${target.replace('../', '')}`;
-              imageFile = zip.file(altPath);
+            if (typeMatch[1] === 'image') {
+              const target = targetMatch[1];
+              const imagePath = target.startsWith('/')
+                ? target.slice(1)
+                : `ppt/slides/${target}`.replace('/slides/../', '/');
+              const normalizedPath = imagePath.replace(/\.\.\//g, '').replace('ppt/ppt/', 'ppt/');
+              let imageFile = zip.file(normalizedPath);
+              if (!imageFile) {
+                const altPath = `ppt/${target.replace('../', '')}`;
+                imageFile = zip.file(altPath);
+              }
+              if (imageFile) {
+                try {
+                  const imgBase64 = await imageFile.async('base64');
+                  const ext = target.split('.').pop().toLowerCase();
+                  const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' :
+                    ext === 'svg' ? 'image/svg+xml' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+                  images[`${slideFile.number}_${idMatch[1]}`] = `data:${mime};base64,${imgBase64}`;
+                } catch (imgErr) {
+                  console.log('Failed to load image:', imgErr.message);
+                }
+              }
+            } else if (typeMatch[1] === 'hyperlink') {
+              if (!slideHyperlinks[slideFile.number]) slideHyperlinks[slideFile.number] = {};
+              slideHyperlinks[slideFile.number][idMatch[1]] = targetMatch[1];
             }
-            if (imageFile) {
-              const imgBase64 = await imageFile.async('base64');
-              const ext = target.split('.').pop().toLowerCase();
-              const mime = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' :
-                ext === 'svg' ? 'image/svg+xml' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-              images[`${slideFile.number}_${idMatch[1]}`] = `data:${mime};base64,${imgBase64}`;
-            }
-          } else if (typeMatch[1] === 'hyperlink') {
-            if (!slideHyperlinks[slideFile.number]) slideHyperlinks[slideFile.number] = {};
-            slideHyperlinks[slideFile.number][idMatch[1]] = targetMatch[1];
           }
         }
+      } catch (relErr) {
+        console.log('Failed to load slide relationships:', relErr.message);
       }
     }
 
-    // Parse each slide
+    // Parse each slide (with individual error handling so one bad slide doesn't crash everything)
     const slides = [];
     for (const slideFile of slideFiles) {
-      const entry = slideFile.entry || zip.file(slideFile.path);
-      if (!entry) continue;
-      const slideXml = await entry.async('text');
-      const links = slideHyperlinks[slideFile.number] || {};
-      const slideHtml = parseSlideXml(slideXml, slideFile.number, images, links);
-      slides.push({
-        number: slideFile.number,
-        html: slideHtml,
-      });
+      try {
+        const entry = slideFile.entry || zip.file(slideFile.path);
+        if (!entry) continue;
+        const slideXml = await entry.async('text');
+        if (!slideXml || typeof slideXml !== 'string') continue;
+        const links = slideHyperlinks[slideFile.number] || {};
+        const slideHtml = parseSlideXml(slideXml, slideFile.number, images, links);
+        slides.push({
+          number: slideFile.number,
+          html: slideHtml || '<p style="color:#6C6C80;">Empty slide</p>',
+        });
+      } catch (slideErr) {
+        console.log(`Failed to parse slide ${slideFile.number}:`, slideErr.message);
+        slides.push({
+          number: slideFile.number,
+          html: `<p style="color:#8E918F;">Slide content could not be loaded</p>`,
+        });
+      }
     }
 
-    // Build full HTML
+    if (slides.length === 0) {
+      throw new Error('No slide content could be extracted');
+    }
+
+    // Build full HTML with slide-card styling
     const fullHtml = slides
       .map(
         (slide) => `
@@ -132,12 +157,13 @@ export async function parsePptx(base64Data) {
       html: null,
       slideCount: 0,
       success: false,
-      error: error.message,
+      error: error.message || 'Unknown error parsing PPTX',
     };
   }
 }
 
 function parseSlideXml(xml, slideNumber, images, hyperlinks) {
+  if (!xml || typeof xml !== 'string') return '';
   let html = '';
 
   // Remove namespace prefixes
@@ -151,44 +177,61 @@ function parseSlideXml(xml, slideNumber, images, hyperlinks) {
 
   // Extract shape tree (contains all content)
   const shapeTreeMatch = cleanXml.match(/<p_spTree>([\s\S]*)<\/p_spTree>/);
-  if (!shapeTreeMatch) return '<p style="color:#6C6C80;">Empty slide</p>';
+  if (!shapeTreeMatch || !shapeTreeMatch[1]) {
+    return '<p style="color:#6C6C80;">Empty slide</p>';
+  }
 
   const shapeTree = shapeTreeMatch[1];
 
-  // Process all content elements in order: shapes, group shapes, pictures, tables
-  html += extractAllContent(shapeTree, slideNumber, images, hyperlinks);
+  // Process all content elements in order
+  let htmlContent = extractAllContent(shapeTree, slideNumber, images, hyperlinks);
 
-  return html || '<p style="color:#6C6C80;">Slide content could not be extracted</p>';
+  if (!htmlContent || !htmlContent.trim()) {
+    // Fallback: extract all raw text from any text nodes
+    const allTexts = [...cleanXml.matchAll(/<a_t>([\s\S]*?)<\/a_t>/g)]
+      .map(m => escapeHtml(m[1]))
+      .filter(t => t.trim());
+    
+    if (allTexts.length > 0) {
+      htmlContent = allTexts.map(t => `<p>${t}</p>`).join('');
+    }
+  }
+
+  return htmlContent || '<p style="color:#6C6C80;">Slide content could not be extracted</p>';
 }
 
 function extractAllContent(xml, slideNumber, images, hyperlinks) {
+  if (!xml || typeof xml !== 'string') return '';
   let html = '';
 
-  // Match shapes, group shapes, pictures, and graphicFrame (tables/charts) in order
+  // Match shapes, group shapes, pictures, and graphicFrame in order
   const elementRegex = /<p_sp>[\s\S]*?<\/p_sp>|<p_grpSp>[\s\S]*?<\/p_grpSp>|<p_pic>[\s\S]*?<\/p_pic>|<p_graphicFrame>[\s\S]*?<\/p_graphicFrame>/g;
   let match;
   while ((match = elementRegex.exec(xml)) !== null) {
     const elem = match[0];
+    if (!elem || typeof elem !== 'string') continue;
 
-    if (elem.startsWith('<p_sp>')) {
-      const content = parseShape(elem, slideNumber, images, hyperlinks);
-      if (content) html += content;
-    } else if (elem.startsWith('<p_grpSp>')) {
-      // Group shape — recursively extract content from inside
-      html += extractAllContent(elem, slideNumber, images, hyperlinks);
-    } else if (elem.startsWith('<p_pic>')) {
-      const embedMatch = elem.match(/r_embed="([^"]+)"/);
-      if (embedMatch) {
-        const imgKey = `${slideNumber}_${embedMatch[1]}`;
-        if (images[imgKey]) {
-          html += `<div style="text-align:center;margin:12px 0;">
-            <img src="${images[imgKey]}" style="max-width:100%;height:auto;border-radius:8px;" />
-          </div>`;
+    try {
+      if (elem.startsWith('<p_sp>')) {
+        const content = parseShape(elem, slideNumber, images, hyperlinks);
+        if (content) html += content;
+      } else if (elem.startsWith('<p_grpSp>')) {
+        html += extractAllContent(elem, slideNumber, images, hyperlinks);
+      } else if (elem.startsWith('<p_pic>')) {
+        const embedMatch = elem.match(/r_embed="([^"]+)"/);
+        if (embedMatch) {
+          const imgKey = `${slideNumber}_${embedMatch[1]}`;
+          if (images[imgKey]) {
+            html += `<div style="text-align:center;margin:12px 0;">
+              <img src="${images[imgKey]}" style="max-width:100%;height:auto;border-radius:8px;" />
+            </div>`;
+          }
         }
+      } else if (elem.startsWith('<p_graphicFrame>')) {
+        html += parseGraphicFrame(elem, hyperlinks);
       }
-    } else if (elem.startsWith('<p_graphicFrame>')) {
-      // Could be a table or chart
-      html += parseGraphicFrame(elem, hyperlinks);
+    } catch (elemErr) {
+      console.log('Error parsing slide element:', elemErr.message);
     }
   }
 
@@ -196,6 +239,7 @@ function extractAllContent(xml, slideNumber, images, hyperlinks) {
 }
 
 function parseGraphicFrame(xml, hyperlinks) {
+  if (!xml || typeof xml !== 'string') return '';
   // Check for table
   const tableMatch = xml.match(/<a_tbl>([\s\S]*?)<\/a_tbl>/);
   if (!tableMatch) return '';
@@ -219,11 +263,10 @@ function parseGraphicFrame(xml, hyperlinks) {
       const tag = isHeader ? 'th' : 'td';
 
       html += `<${tag}${colspan}${rowspan}>`;
-      // Extract text from cell paragraphs
       const cellParas = cell.match(/<a_p[ >][\s\S]*?<\/a_p>/g) || [];
       for (const para of cellParas) {
         const text = parseSlideParagraph(para, hyperlinks);
-        if (text.trim()) html += `<p>${text}</p>`;
+        if (text && text.trim()) html += `<p>${text}</p>`;
       }
       html += `</${tag}>`;
     }
@@ -234,11 +277,12 @@ function parseGraphicFrame(xml, hyperlinks) {
 }
 
 function parseShape(shapeXml, slideNumber, images, hyperlinks) {
+  if (!shapeXml || typeof shapeXml !== 'string') return null;
   let content = '';
 
   // Extract text body
   const textBodyMatch = shapeXml.match(/<p_txBody>([\s\S]*?)<\/p_txBody>/);
-  if (!textBodyMatch) return null;
+  if (!textBodyMatch || !textBodyMatch[1]) return null;
 
   const textBody = textBodyMatch[1];
 
@@ -246,31 +290,35 @@ function parseShape(shapeXml, slideNumber, images, hyperlinks) {
   const paragraphs = textBody.match(/<a_p[ >][\s\S]*?<\/a_p>/g) || [];
 
   for (const para of paragraphs) {
-    const paraContent = parseSlideParagraph(para, hyperlinks);
-    if (paraContent.trim()) {
-      const pprMatch = para.match(/sz="(\d+)"/);
-      const fontSize = pprMatch ? parseInt(pprMatch[1]) / 100 : null;
+    try {
+      const paraContent = parseSlideParagraph(para, hyperlinks);
+      if (paraContent && paraContent.trim()) {
+        const pprMatch = para.match(/sz="(\d+)"/);
+        const fontSize = pprMatch ? parseInt(pprMatch[1]) / 100 : null;
 
-      let tag = 'p';
-      let style = '';
+        let tag = 'p';
+        let style = '';
 
-      if (fontSize && fontSize > 28) {
-        tag = 'h2';
-        style = ' style="color:#4A9EFF;margin-bottom:12px;"';
-      } else if (fontSize && fontSize > 20) {
-        tag = 'h3';
-        style = ' style="margin-bottom:8px;"';
+        if (fontSize && fontSize > 28) {
+          tag = 'h2';
+          style = ' style="color:#4A9EFF;margin-bottom:12px;"';
+        } else if (fontSize && fontSize > 20) {
+          tag = 'h3';
+          style = ' style="margin-bottom:8px;"';
+        }
+
+        // Check alignment
+        const alignMatch = para.match(/algn="([^"]+)"/);
+        if (alignMatch) {
+          const align = alignMatch[1] === 'ctr' ? 'center' : alignMatch[1] === 'r' ? 'right' : 'left';
+          const existingStyle = style ? style.slice(8, -1) : '';
+          style = ` style="text-align:${align};${existingStyle}"`;
+        }
+
+        content += `<${tag}${style}>${paraContent}</${tag}>`;
       }
-
-      // Check alignment
-      const alignMatch = para.match(/algn="([^"]+)"/);
-      if (alignMatch) {
-        const align = alignMatch[1] === 'ctr' ? 'center' : alignMatch[1] === 'r' ? 'right' : 'left';
-        const existingStyle = style ? style.slice(8, -1) : '';
-        style = ` style="text-align:${align};${existingStyle}"`;
-      }
-
-      content += `<${tag}${style}>${paraContent}</${tag}>`;
+    } catch (paraErr) {
+      console.log('Error parsing paragraph:', paraErr.message);
     }
   }
 
@@ -278,44 +326,47 @@ function parseShape(shapeXml, slideNumber, images, hyperlinks) {
 }
 
 function parseSlideParagraph(paraXml, hyperlinks) {
+  if (!paraXml || typeof paraXml !== 'string') return '';
   let text = '';
 
-  // Match runs and hyperlinks in order
-  const elemRegex = /<a_r>[\s\S]*?<\/a_r>|<a_hlinkClick[\s\S]*?\/>[\s\S]*?<a_r>[\s\S]*?<\/a_r>/g;
-
-  // First try to extract hyperlink-wrapped runs
-  // In PPTX, hyperlinks are in rPr: <a:rPr><a:hlinkClick r:id="rId2"/></a:rPr>
   const runs = paraXml.match(/<a_r>[\s\S]*?<\/a_r>/g) || [];
 
   for (const run of runs) {
-    // Get text content
-    const textMatch = run.match(/<a_t>([\s\S]*?)<\/a_t>/);
-    if (!textMatch) continue;
+    try {
+      // Get text content
+      const textMatch = run.match(/<a_t>([\s\S]*?)<\/a_t>/);
+      if (!textMatch || !textMatch[1]) continue;
 
-    let runText = escapeHtml(textMatch[1]);
+      let runText = escapeHtml(textMatch[1]);
 
-    // Check formatting
-    const isBold = run.includes('b="1"');
-    const isItalic = run.includes('i="1"');
-    const isUnderline = run.includes('u="sng"');
+      // Check formatting
+      const isBold = run.includes('b="1"');
+      const isItalic = run.includes('i="1"');
+      const isUnderline = run.includes('u="sng"');
 
-    // Check color
-    const colorMatch = run.match(/<a_solidFill>[\s\S]*?<a_srgbClr val="([^"]+)"[\s\S]*?<\/a_solidFill>/);
-    if (colorMatch) {
-      runText = `<span style="color:#${colorMatch[1]}">${runText}</span>`;
+      // Check color
+      const colorMatch = run.match(/<a_solidFill>[\s\S]*?<a_srgbClr val="([^"]+)"[\s\S]*?<\/a_solidFill>/);
+      if (colorMatch && colorMatch[1]) {
+        runText = `<span style="color:#${colorMatch[1]}">${runText}</span>`;
+      }
+
+      if (isBold) runText = `<strong>${runText}</strong>`;
+      if (isItalic) runText = `<em>${runText}</em>`;
+      if (isUnderline) runText = `<u>${runText}</u>`;
+
+      // Check for hyperlink
+      const hlinkMatch = run.match(/r_id="([^"]+)"/);
+      if (hlinkMatch && hlinkMatch[1] && hyperlinks && hyperlinks[hlinkMatch[1]]) {
+        const href = hyperlinks[hlinkMatch[1]];
+        if (href && typeof href === 'string') {
+          runText = `<a href="${escapeHtml(href)}" style="color:#4A9EFF;">${runText}</a>`;
+        }
+      }
+
+      text += runText;
+    } catch (runErr) {
+      console.log('Error parsing run:', runErr.message);
     }
-
-    if (isBold) runText = `<strong>${runText}</strong>`;
-    if (isItalic) runText = `<em>${runText}</em>`;
-    if (isUnderline) runText = `<u>${runText}</u>`;
-
-    // Check for hyperlink
-    const hlinkMatch = run.match(/r_id="([^"]+)"/);
-    if (hlinkMatch && hyperlinks && hyperlinks[hlinkMatch[1]]) {
-      runText = `<a href="${escapeHtml(hyperlinks[hlinkMatch[1]])}" style="color:#4A9EFF;">${runText}</a>`;
-    }
-
-    text += runText;
   }
 
   // Handle bullet points
@@ -326,15 +377,11 @@ function parseSlideParagraph(paraXml, hyperlinks) {
     text = `${bullet} ${text}`;
   }
 
-  // Handle numbered lists
-  if (paraXml.includes('<a_buAutoNum') && text) {
-    // Already handled by bullet above with bullet char
-  }
-
   return text;
 }
 
 function escapeHtml(text) {
+  if (!text || typeof text !== 'string') return '';
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

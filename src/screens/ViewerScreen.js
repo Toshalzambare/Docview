@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity, Share, Alert, Modal, TextInput, Dimensions } from 'react-native';
+import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 import * as XLSX from 'xlsx';
@@ -11,6 +11,7 @@ import { parsePptx } from '../utils/pptxParser';
 import { parseLegacyPpt } from '../utils/pptParser';
 import { parseLegacyDoc } from '../utils/docParser';
 import SearchBar from '../components/SearchBar';
+import { useHistory } from '../contexts/HistoryContext';
 
 // Viewers
 import PdfViewer from '../viewers/PdfViewer';
@@ -20,6 +21,9 @@ import JsonViewer from '../viewers/JsonViewer';
 import MarkdownViewer from '../viewers/MarkdownViewer';
 import SpreadsheetViewer from '../viewers/SpreadsheetViewer';
 import WebViewer from '../viewers/WebViewer';
+import CodeViewer from '../viewers/CodeViewer';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Cache for content:// URI copies to avoid re-copying on the same file
 const contentUriCache = {};
@@ -189,7 +193,10 @@ const detectExtFromContent = async (uri, onProgress) => {
 };
 
 export default function ViewerScreen({ route, navigation }) {
-  const { file } = route.params;
+  const { file: initialFile } = route.params;
+  const [file, setFile] = useState(initialFile);
+  const { addToHistory, saveAs } = useHistory();
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [content, setContent] = useState(null);
@@ -205,11 +212,46 @@ export default function ViewerScreen({ route, navigation }) {
   const webViewRef = useRef(null);
   const isRemote = isRemoteUrl(file.uri);
 
+  // Save As modal state
+  const [isRenameVisible, setIsRenameVisible] = useState(false);
+  const [customSaveName, setCustomSaveName] = useState('');
+
   const onProgress = (progress) => setDownloadProgress(progress);
 
   const rawExt = getFileExtension(file.name);
   const ext = detectedExt || rawExt;
   const fileType = getFileType(detectedExt ? `file.${detectedExt}` : file.name);
+
+  // Header options & Save As triggering
+  const triggerSaveAs = () => {
+    const baseName = file.name.replace(/\.[^/.]+$/, "");
+    setCustomSaveName(baseName);
+    setIsRenameVisible(true);
+  };
+
+  const handleSaveAsSubmit = async () => {
+    if (!customSaveName.trim()) return;
+    setIsRenameVisible(false);
+    await saveAs(file, customSaveName.trim());
+  };
+
+  const handleShare = async () => {
+    try {
+      const uriToShare = localUri || file.uri;
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(uriToShare, {
+          mimeType: fileType?.mime || '*/*',
+          dialogTitle: 'Open In...'
+        });
+      } else {
+        Alert.alert("Error", "Sharing is not available on this device.");
+      }
+    } catch (e) {
+      console.log('Share error:', e);
+      Alert.alert("Error", "Could not share or open the file.");
+    }
+  };
 
   useEffect(() => {
     navigation.setOptions({
@@ -222,19 +264,35 @@ export default function ViewerScreen({ route, navigation }) {
       headerRight: () => (
         <View style={styles.headerActions}>
           <TouchableOpacity onPress={() => setShowSearch(s => !s)} style={styles.headerButton}>
-            <Text style={styles.headerButtonText}>Search</Text>
+            <Text style={styles.headerButtonText}>🔍</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={triggerSaveAs} style={styles.headerButton}>
+            <Text style={styles.headerButtonText}>💾</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={handleShare} style={styles.headerButton}>
-            <Text style={styles.headerButtonText}>Share</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={showFileInfo} style={styles.headerButton}>
-            <Text style={styles.headerButtonText}>Info</Text>
+            <Text style={styles.headerButtonText}>📤</Text>
           </TouchableOpacity>
         </View>
       ),
     });
-    loadFile();
-  }, []);
+  }, [file, fileType, detectedExt]);
+
+  useEffect(() => {
+    const logHistoryAndLoad = async () => {
+      // Reset view state when a new file is loaded
+      setLoading(true);
+      setError(null);
+      setContent(null);
+      setViewerType(null);
+      
+      const currentFile = route.params.file;
+      const persistedFile = await addToHistory(currentFile);
+      const activeFile = persistedFile || currentFile;
+      setFile(activeFile);
+      await loadFile(activeFile);
+    };
+    logHistoryAndLoad();
+  }, [route.params.file?.uri]);
 
   // Search handler
   const handleSearch = useCallback((query) => {
@@ -266,18 +324,7 @@ export default function ViewerScreen({ route, navigation }) {
     setCurrentSearchMatch(prev => (prev - 1 + Math.max(searchMatches, 1)) % Math.max(searchMatches, 1));
   }, [searchMatches]);
 
-  const handleShare = async () => {
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(file.uri);
-      } else {
-        await Share.share({ url: file.uri, title: file.name });
-      }
-    } catch (e) {
-      console.log('Share error:', e);
-    }
-  };
+
 
   const showFileInfo = () => {
     Alert.alert(
@@ -295,17 +342,18 @@ export default function ViewerScreen({ route, navigation }) {
     );
   };
 
-  const loadFile = async () => {
+  const loadFile = async (activeFile = file) => {
     try {
       setLoading(true);
       setError(null);
       setDownloadProgress(null);
 
       // For remote files, download first to get a local path
-      let fileUri = file.uri;
-      if (isRemote) {
+      let fileUri = activeFile.uri;
+      const isRemoteFile = isRemoteUrl(activeFile.uri);
+      if (isRemoteFile) {
         setDownloadProgress(0);
-        const cachedPath = await resolveFilePath(file.uri, onProgress);
+        const cachedPath = await resolveFilePath(activeFile.uri, onProgress);
         fileUri = cachedPath;
         setLocalUri(cachedPath);
         setDownloadProgress(1);
@@ -313,7 +361,7 @@ export default function ViewerScreen({ route, navigation }) {
 
       // If no extension or unknown extension, try to detect from file content
       let effectiveExt = ext;
-      if (!rawExt || !getFileType(file.name).category || getFileType(file.name).category === 'unknown') {
+      if (!rawExt || !getFileType(activeFile.name).category || getFileType(activeFile.name).category === 'unknown') {
         const detected = await detectExtFromContent(fileUri, onProgress);
         if (detected) {
           effectiveExt = detected;
@@ -409,6 +457,23 @@ export default function ViewerScreen({ route, navigation }) {
           setViewerType('text');
           break;
 
+        // Code extensions mapping
+        case 'js':
+        case 'ts':
+        case 'jsx':
+        case 'tsx':
+        case 'py':
+        case 'java':
+        case 'c':
+        case 'cpp':
+        case 'h':
+        case 'sh':
+        case 'css':
+          const codeContent = await readFileAsText(uri, onProgress);
+          setContent(codeContent);
+          setViewerType('code');
+          break;
+
         // All other text-based files
         default:
           try {
@@ -416,7 +481,7 @@ export default function ViewerScreen({ route, navigation }) {
             setContent(textContent);
             setViewerType('text');
           } catch {
-            setError(`Cannot preview .${ext} files. The file format is not supported for viewing.`);
+            setError(`Cannot preview .${effectiveExt} files. The file format is not supported for viewing.`);
           }
           break;
       }
@@ -485,17 +550,26 @@ export default function ViewerScreen({ route, navigation }) {
       const result = parseLegacyDoc(base64);
 
       if (result.success && result.text && result.text.length > 10) {
-        setContent(result.text);
-        setViewerType('text');
+        // Wrap plain text in HTML paragraphs to render via WebViewer (makes it look like a document)
+        const html = result.text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .split('\n')
+          .filter(line => line.trim())
+          .map(line => `<p>${line}</p>`)
+          .join('');
+        setContent(html);
+        setViewerType('web');
       } else {
         setError(
-          'Could not extract readable text from this .doc file.\n' +
+          'Could not extract readable text from this .doc file.\\n' +
           (result.error || 'The old .doc binary format has limited support.')
         );
       }
     } catch (err) {
       console.log('DOC parse error:', err);
-      setError('Could not read .doc file: ' + err.message + '\nThe old .doc format has limited support.');
+      setError('Could not read .doc file: ' + err.message + '\\nThe old .doc format has limited support.');
     }
   };
 
@@ -674,6 +748,8 @@ export default function ViewerScreen({ route, navigation }) {
         return <PdfViewer uri={effectiveUri} />;
       case 'image':
         return <ImageViewer uri={effectiveUri} />;
+      case 'code':
+        return <CodeViewer content={content} language={ext} />;
       case 'text':
         return <TextViewer content={content} language={ext} searchQuery={searchQuery} currentMatch={currentSearchMatch} />;
       case 'json':
@@ -709,7 +785,47 @@ export default function ViewerScreen({ route, navigation }) {
           onPrev={handleSearchPrev}
         />
       )}
+      
       {renderViewer()}
+
+      {/* Save As Modal Dialog inside Viewer Screen */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={isRenameVisible}
+        onRequestClose={() => setIsRenameVisible(false)}
+      >
+        <View style={styles.modalCentered}>
+          <View style={styles.dialogCard}>
+            <Text style={styles.dialogTitle}>Save Document</Text>
+            <Text style={styles.dialogSubtitle}>Enter custom file name:</Text>
+            
+            <TextInput
+              style={styles.dialogInput}
+              value={customSaveName}
+              onChangeText={setCustomSaveName}
+              autoFocus={true}
+              placeholder="Filename"
+              placeholderTextColor={theme.colors.textMuted}
+            />
+
+            <View style={styles.dialogButtons}>
+              <TouchableOpacity
+                style={styles.dialogBtnCancel}
+                onPress={() => setIsRenameVisible(false)}
+              >
+                <Text style={styles.dialogBtnCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.dialogBtnSubmit}
+                onPress={handleSaveAsSubmit}
+              >
+                <Text style={styles.dialogBtnSubmitText}>Save As</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -804,5 +920,71 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: theme.fontSize.md,
+  },
+  modalCentered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: theme.colors.overlay,
+  },
+  dialogCard: {
+    width: SCREEN_WIDTH * 0.85,
+    backgroundColor: theme.colors.card,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    elevation: 10,
+  },
+  dialogTitle: {
+    fontSize: theme.fontSize.lg,
+    fontWeight: '700',
+    color: theme.colors.text,
+    marginBottom: theme.spacing.xs,
+  },
+  dialogSubtitle: {
+    fontSize: theme.fontSize.sm,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  dialogInput: {
+    width: '100%',
+    backgroundColor: theme.colors.background,
+    borderColor: theme.colors.border,
+    borderWidth: 1,
+    borderRadius: theme.borderRadius.sm,
+    padding: theme.spacing.sm,
+    color: theme.colors.text,
+    fontSize: theme.fontSize.md,
+    marginBottom: theme.spacing.lg,
+  },
+  dialogButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    width: '100%',
+    gap: 12,
+  },
+  dialogBtnCancel: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: theme.borderRadius.sm,
+  },
+  dialogBtnCancelText: {
+    color: theme.colors.textMuted,
+    fontSize: theme.fontSize.sm + 1,
+    fontWeight: '700',
+  },
+  dialogBtnSubmit: {
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: theme.borderRadius.sm,
+  },
+  dialogBtnSubmitText: {
+    color: '#000000',
+    fontSize: theme.fontSize.sm + 1,
+    fontWeight: '700',
   },
 });

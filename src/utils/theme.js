@@ -1,21 +1,21 @@
-// DocView Dark Theme
+// DocView Google Drive-inspired Material Design 3 Dark Theme
 export const theme = {
   colors: {
-    background: '#0D0D0D',
-    surface: '#1A1A2E',
-    surfaceLight: '#16213E',
-    card: '#1E1E32',
-    accent: '#4A9EFF',
-    accentLight: '#6BB3FF',
-    accentDark: '#2D7CD6',
-    text: '#FFFFFF',
-    textSecondary: '#A0A0B8',
-    textMuted: '#6C6C80',
-    border: '#2A2A40',
-    success: '#4ADE80',
-    warning: '#FBBF24',
-    error: '#F87171',
-    overlay: 'rgba(0,0,0,0.7)',
+    background: '#131314',     // Dark slate gray background
+    surface: '#1E1F20',        // Google Card/Bar surface
+    surfaceLight: '#282A2C',   // Raised element background
+    card: '#1E1F20',           // Drawer/Modal card
+    accent: '#8AB4F8',         // Google Blue Dark accent
+    accentLight: '#A8C7FA',    // Google Light Blue
+    accentDark: '#4F86E4',     // Darker google blue
+    text: '#E3E3E3',           // Primary text
+    textSecondary: '#C4C7C5',  // Secondary text
+    textMuted: '#8E918F',      // Muted description text
+    border: '#444746',         // Border dividing line
+    success: '#6DD58C',        // Soft emerald green
+    warning: '#F3B43F',        // Soft mustard gold
+    error: '#F2B8B5',          // Soft rose red
+    overlay: 'rgba(0, 0, 0, 0.6)',
   },
   spacing: {
     xs: 4,
@@ -39,6 +39,6 @@ export const theme = {
     lg: 18,
     xl: 22,
     xxl: 28,
-    hero: 36,
+    hero: 32,
   },
 };

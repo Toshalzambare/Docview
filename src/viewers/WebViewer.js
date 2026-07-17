@@ -60,6 +60,8 @@ const WebViewer = forwardRef(function WebViewer({ html, searchQuery }, ref) {
     `);
   }, [searchQuery]);
 
+  const isPresentation = html && html.includes('class="slide"');
+
   const wrappedHtml = `
     <!DOCTYPE html>
     <html>
@@ -69,47 +71,79 @@ const WebViewer = forwardRef(function WebViewer({ html, searchQuery }, ref) {
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
           background-color: ${theme.colors.background};
-          color: ${theme.colors.text};
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 15px;
-          line-height: 1.6;
+          /* Center the document page container */
+          display: flex;
+          justify-content: center;
+          padding: 16px 8px;
+          min-height: 100vh;
+        }
+        .document-page {
+          background-color: #FFFFFF;
+          color: #000000;
+          font-family: 'Times New Roman', Times, serif;
+          font-size: 16px;
+          line-height: 1.5;
           padding: 16px;
+          width: 100%;
+          max-width: 100%;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+          border-radius: 4px;
           word-wrap: break-word;
           overflow-wrap: break-word;
         }
-        h1, h2, h3, h4, h5, h6 { color: ${theme.colors.text}; margin: 16px 0 8px; }
-        p { margin-bottom: 12px; }
-        a { color: ${theme.colors.accent}; }
-        img { max-width: 100%; height: auto; border-radius: 8px; }
-        table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-        th, td { border: 1px solid ${theme.colors.border}; padding: 8px 12px; text-align: left; }
-        th { background-color: ${theme.colors.surface}; color: ${theme.colors.accentLight}; font-weight: 600; }
-        tr:nth-child(even) { background-color: ${theme.colors.surface}40; }
-        pre, code { background-color: ${theme.colors.surface}; border-radius: 4px; font-family: monospace; }
-        pre { padding: 12px; overflow-x: auto; }
-        code { padding: 2px 6px; }
-        blockquote { border-left: 3px solid ${theme.colors.accent}; padding-left: 12px; margin: 8px 0; color: ${theme.colors.textSecondary}; }
-        ul, ol { padding-left: 24px; margin-bottom: 12px; }
-        li { margin-bottom: 4px; }
+        h1, h2, h3, h4, h5, h6 { 
+          color: #000000; 
+          margin: 20px 0 10px; 
+          font-family: Arial, Helvetica, sans-serif;
+        }
+        h1 { font-size: 2em; }
+        h2 { font-size: 1.5em; }
+        h3 { font-size: 1.17em; }
+        p { margin-bottom: 16px; }
+        a { color: #0000EE; text-decoration: underline; }
+        img { max-width: 100%; height: auto; margin: 10px 0; display: block; }
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        th, td { border: 1px solid #000000; padding: 6px 10px; text-align: left; vertical-align: top; }
+        th { background-color: #F0F0F0; font-weight: bold; }
+        pre, code { font-family: monospace; }
+        ul, ol { padding-left: 30px; margin-bottom: 16px; }
+        li { margin-bottom: 6px; }
 
-        /* PowerPoint slide styles */
+        /* PowerPoint slide styles overrides */
+        .presentation-container {
+          width: 100%;
+          max-width: 900px;
+          display: flex;
+          flex-direction: column;
+        }
         .slide {
-          background: ${theme.colors.surface};
-          border-radius: 12px;
-          padding: 24px;
-          margin-bottom: 16px;
-          border: 1px solid ${theme.colors.border};
+          background: #FFFFFF;
+          border-radius: 8px;
+          padding: 30px;
+          margin-bottom: 24px;
+          box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+          border: 1px solid #CCCCCC;
+          aspect-ratio: 16 / 9; /* Force slide ratio */
+          display: flex;
+          flex-direction: column;
+          position: relative;
         }
         .slide-number {
-          color: ${theme.colors.textMuted};
+          position: absolute;
+          bottom: 10px;
+          right: 15px;
+          color: #666666;
           font-size: 12px;
-          margin-bottom: 8px;
+          font-family: Arial, sans-serif;
         }
-        .slide h2 { color: ${theme.colors.accent}; }
+        .slide h2, .slide h3 { font-family: Arial, sans-serif; }
       </style>
     </head>
     <body>
-      ${html}
+      ${isPresentation 
+        ? `<div class="presentation-container">${html}</div>` 
+        : `<div class="document-page">${html}</div>`
+      }
     </body>
     </html>
   `;
@@ -120,7 +154,7 @@ const WebViewer = forwardRef(function WebViewer({ html, searchQuery }, ref) {
         ref={webViewRef}
         source={{ html: wrappedHtml }}
         style={styles.webview}
-        originWhitelist={['about:blank', 'about:srcdoc']}
+        originWhitelist={['*']}
         scrollEnabled={true}
         scalesPageToFit={false}
         javaScriptEnabled={true}

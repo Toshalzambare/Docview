@@ -222,10 +222,15 @@ function extractSlidesFromRecords(bytes) {
     }
   }
 
-  // Filter out slides that only have very short garbage text
-  return slides.filter(s =>
-    s.texts.some(t => t.text.length > 1)
-  );
+  // Filter out slides that only have very short garbage text, 
+  // but if that removes EVERYTHING and we had text, just return one fallback slide.
+  let validSlides = slides.filter(s => s.texts.some(t => t.text.trim().length > 0));
+  
+  if (validSlides.length === 0 && allTexts.length > 0) {
+    validSlides = [{ texts: allTexts }];
+  }
+
+  return validSlides;
 }
 
 function readUInt16(bytes, offset) {

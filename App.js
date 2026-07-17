@@ -1,12 +1,15 @@
 import React, { useEffect, useRef } from 'react';
-import { StatusBar, Linking, Platform, NativeModules } from 'react-native';
+import { StatusBar, Platform } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
+import * as Linking from 'expo-linking';
 import ReactNativeBlobUtil from 'react-native-blob-util';
+import { ShareIntentProvider, useShareIntentContext } from 'expo-share-intent';
 import HomeScreen from './src/screens/HomeScreen';
 import ViewerScreen from './src/screens/ViewerScreen';
 import { theme } from './src/utils/theme';
+import { HistoryProvider } from './src/contexts/HistoryContext';
 
 const Stack = createNativeStackNavigator();
 
@@ -66,76 +69,63 @@ const detectOfficeFormat = async (filePath) => {
   }
 };
 
-// Get a real filename for a content:// URI
-const resolveContentUri = async (contentUri) => {
+// Resolve a file URI to a name with extension detection
+const resolveFileForViewer = async (fileUri, fileName) => {
+  // If we already have a good name with extension, use it
+  if (fileName && fileName.includes('.')) {
+    return { uri: fileUri, name: fileName };
+  }
+
+  // Copy to local cache if needed
   const timestamp = Date.now();
+  let localUri = fileUri;
 
-  // First, try to get file info which may include the display name and MIME type
-  let displayName = null;
-  let mimeType = null;
-
-  try {
-    const stat = await ReactNativeBlobUtil.fs.stat(contentUri);
-    if (stat && stat.filename) {
-      displayName = stat.filename;
+  if (fileUri.startsWith('content://')) {
+    const destUri = `${FileSystem.cacheDirectory}incoming_${timestamp}_${fileName || 'file'}`;
+    try {
+      await FileSystem.copyAsync({ from: fileUri, to: destUri });
+      localUri = destUri;
+    } catch (copyErr) {
+      console.log('FileSystem.copyAsync failed, trying blob-util:', copyErr.message);
+      const destPath = destUri.replace('file://', '');
+      await ReactNativeBlobUtil.fs.cp(fileUri, destPath);
+      localUri = destUri;
     }
-  } catch (e) {
-    console.log('stat failed:', e.message);
-  }
-
-  // Copy content:// to cache — try expo first, fallback to blob-util
-  const tempName = displayName || `file_${timestamp}`;
-  const destUri = `${FileSystem.cacheDirectory}incoming_${timestamp}_${tempName}`;
-  try {
-    await FileSystem.copyAsync({ from: contentUri, to: destUri });
-  } catch (copyErr) {
-    console.log('FileSystem.copyAsync failed, trying blob-util:', copyErr.message);
-    const destPath = destUri.replace('file://', '');
-    await ReactNativeBlobUtil.fs.cp(contentUri, destPath);
-  }
-
-  // If we got a display name with a valid extension, use it
-  if (displayName && displayName.includes('.')) {
-    return { uri: destUri, name: displayName };
   }
 
   // Try to detect file type from content
   try {
-    const localPath = destUri.replace('file://', '');
-    const header = await ReactNativeBlobUtil.fs.readFile(localPath, 'base64');
-    const headerStr = atob(header.substring(0, 24));
+    const localPath = localUri.replace('file://', '');
+    const exists = await ReactNativeBlobUtil.fs.exists(localPath);
+    if (exists) {
+      const header = await ReactNativeBlobUtil.fs.readFile(localPath, 'base64');
+      const headerStr = atob(header.substring(0, 24));
 
-    if (headerStr.startsWith('%PDF')) {
-      return { uri: destUri, name: (displayName || 'document') + '.pdf' };
-    }
-    if (headerStr.substring(0, 2) === 'PK') {
-      // ZIP-based Office file — use JSZip for reliable detection
-      const format = await detectOfficeFormat(localPath);
-      const nameMap = { pptx: 'presentation', xlsx: 'spreadsheet', docx: 'document', zip: 'archive' };
-      return { uri: destUri, name: (displayName || nameMap[format] || 'document') + '.' + format };
-    }
-    if (headerStr.charCodeAt(0) === 0xD0 && headerStr.charCodeAt(1) === 0xCF) {
-      return { uri: destUri, name: (displayName || 'document') + '.doc' };
-    }
-    if (headerStr.startsWith('\x89PNG')) {
-      return { uri: destUri, name: (displayName || 'image') + '.png' };
-    }
-    if (headerStr.startsWith('\xFF\xD8\xFF')) {
-      return { uri: destUri, name: (displayName || 'image') + '.jpg' };
-    }
-    if (headerStr.startsWith('GIF8')) {
-      return { uri: destUri, name: (displayName || 'image') + '.gif' };
+      if (headerStr.startsWith('%PDF')) {
+        return { uri: localUri, name: (fileName || 'document') + '.pdf' };
+      }
+      if (headerStr.substring(0, 2) === 'PK') {
+        const format = await detectOfficeFormat(localPath);
+        const nameMap = { pptx: 'presentation', xlsx: 'spreadsheet', docx: 'document', zip: 'archive' };
+        return { uri: localUri, name: (fileName || nameMap[format] || 'document') + '.' + format };
+      }
+      if (headerStr.charCodeAt(0) === 0xD0 && headerStr.charCodeAt(1) === 0xCF) {
+        return { uri: localUri, name: (fileName || 'document') + '.doc' };
+      }
     }
   } catch (e) {
     console.log('Header detection failed:', e.message);
   }
 
-  return { uri: destUri, name: displayName || `file_${timestamp}` };
+  return { uri: localUri, name: fileName || `file_${timestamp}` };
 };
 
-export default function App() {
+// Inner app component that has access to share intent context
+function AppInner() {
   const navigationRef = useRef(null);
   const pendingFile = useRef(null);
+  const lastHandledUrl = useRef(null);
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
 
   const navigateToFile = (file) => {
     if (navigationRef.current?.isReady()) {
@@ -145,47 +135,139 @@ export default function App() {
     }
   };
 
-  const handleIncomingUrl = async (url) => {
+  // Handle a file URI from ACTION_VIEW intent ("Open with" from file managers, WhatsApp, etc.)
+  const handleIncomingFileUrl = async (url) => {
     if (!url) return;
-    // Skip expo dev client URLs
-    if (url.includes('expo-development-client')) return;
-    try {
-      let fileUri = url;
-      let fileName = null;
 
-      if (Platform.OS === 'android' && url.startsWith('content://')) {
-        const result = await resolveContentUri(url);
-        fileUri = result.uri;
-        fileName = result.name;
-      } else if (url.startsWith('http://') || url.startsWith('https://')) {
-        // Remote URL — pass it through directly, ViewerScreen handles downloading
-        fileUri = url;
-        const urlPath = url.split('?')[0].split('#')[0];
-        fileName = decodeURIComponent(urlPath.split('/').pop() || 'Remote File');
-      } else {
-        fileName = decodeURIComponent(fileUri.split('/').pop() || 'Unknown');
+    // Skip our own scheme URLs (deep links, not file intents)
+    if (url.startsWith('docview://') || url.startsWith('exp+docview://')) return;
+
+    // Only handle file:// and content:// URIs (these are actual file intents)
+    if (!url.startsWith('file://') && !url.startsWith('content://')) return;
+
+    // Prevent double-processing the same URL
+    if (lastHandledUrl.current === url) return;
+    lastHandledUrl.current = url;
+
+    try {
+      // Try to extract a filename from the URI path
+      let fileName = null;
+      try {
+        const pathSegments = url.split('/');
+        const lastSegment = pathSegments.pop() || '';
+        const decoded = decodeURIComponent(lastSegment);
+        // Only use it as a name if it looks like a filename (has a dot extension or is non-empty)
+        if (decoded && decoded.length > 0 && !decoded.startsWith('?')) {
+          fileName = decoded;
+        }
+      } catch (e) {
+        console.log('Could not extract filename from URI:', e.message);
       }
 
+      // If no good filename, use a generic one
+      if (!fileName || fileName.length === 0) {
+        fileName = 'Opened File';
+      }
+
+      // Resolve the file (copy from content:// if needed, detect type from content)
+      const resolved = await resolveFileForViewer(url, fileName);
+
       navigateToFile({
-        uri: fileUri,
-        name: fileName,
+        uri: resolved.uri,
+        name: resolved.name,
         openedAt: new Date().toISOString(),
       });
     } catch (err) {
-      console.log('Error handling incoming file:', err);
+      console.log('Error handling incoming file URL:', err);
     }
   };
 
+  // Handle share intent from WhatsApp / file managers / other apps (ACTION_SEND)
   useEffect(() => {
-    Linking.getInitialURL().then((url) => {
-      if (url) handleIncomingUrl(url);
-    });
+    if (!hasShareIntent || !shareIntent) return;
 
+    const processShareIntent = async () => {
+      try {
+        // shareIntent.files is an array of shared files
+        const files = shareIntent.files;
+        if (files && files.length > 0) {
+          const sharedFile = files[0];
+          const fileUri = sharedFile.path || sharedFile.uri;
+          const fileName = sharedFile.fileName || sharedFile.name;
+          const mimeType = sharedFile.mimeType || sharedFile.type;
+
+          if (fileUri) {
+            let resolvedName = fileName;
+
+            // If no name, try to extract from URI
+            if (!resolvedName) {
+              resolvedName = decodeURIComponent(fileUri.split('/').pop() || 'Shared File');
+            }
+
+            // If no extension in name, try from MIME type
+            if (resolvedName && !resolvedName.includes('.') && mimeType && mimeToExt[mimeType]) {
+              resolvedName = resolvedName + '.' + mimeToExt[mimeType];
+            }
+
+            // Mark this URL as handled so the Linking handler doesn't double-process it
+            lastHandledUrl.current = fileUri;
+
+            // Resolve the file (copy from content:// if needed, detect type)
+            const resolved = await resolveFileForViewer(fileUri, resolvedName);
+
+            navigateToFile({
+              uri: resolved.uri,
+              name: resolved.name,
+              openedAt: new Date().toISOString(),
+            });
+          }
+        } else if (shareIntent.text) {
+          // Text/URL sharing — just open as text
+          navigateToFile({
+            uri: shareIntent.text,
+            name: 'Shared Text.txt',
+            openedAt: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.log('Error processing share intent:', err);
+      } finally {
+        resetShareIntent();
+      }
+    };
+
+    processShareIntent();
+  }, [hasShareIntent, shareIntent]);
+
+  // Handle ACTION_VIEW intents ("Open with" from file managers, WhatsApp open, etc.)
+  useEffect(() => {
+    // Cold start: check if the app was launched with a file URL
+    const checkInitialUrl = async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl) {
+          // Small delay to let navigation mount and share-intent process first
+          setTimeout(() => {
+            handleIncomingFileUrl(initialUrl);
+          }, 500);
+        }
+      } catch (err) {
+        console.log('Error getting initial URL:', err);
+      }
+    };
+
+    checkInitialUrl();
+
+    // Warm start: app is already running and receives a new file intent
     const subscription = Linking.addEventListener('url', (event) => {
-      if (event?.url) handleIncomingUrl(event.url);
+      if (event.url) {
+        handleIncomingFileUrl(event.url);
+      }
     });
 
-    return () => subscription?.remove();
+    return () => {
+      subscription?.remove();
+    };
   }, []);
 
   const onNavigationReady = () => {
@@ -239,5 +321,20 @@ export default function App() {
         </Stack.Navigator>
       </NavigationContainer>
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <ShareIntentProvider
+      options={{
+        debug: __DEV__,
+        resetOnBackground: true,
+      }}
+    >
+      <HistoryProvider>
+        <AppInner />
+      </HistoryProvider>
+    </ShareIntentProvider>
   );
 }

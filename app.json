@@ -51,15 +51,42 @@
       "intentFilters": [
         {
           "action": "VIEW",
-          "category": ["DEFAULT", "BROWSABLE"],
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
           "data": [
+            { "scheme": "file" },
+            { "scheme": "content" },
+            { "mimeType": "application/pdf" },
+            { "mimeType": "application/msword" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+            { "mimeType": "application/vnd.ms-excel" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+            { "mimeType": "application/vnd.ms-powerpoint" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+            { "mimeType": "text/plain" },
+            { "mimeType": "text/csv" },
             { "mimeType": "*/*" }
           ]
         },
         {
           "action": "SEND",
-          "category": ["DEFAULT"],
+          "category": [
+            "DEFAULT"
+          ],
           "data": [
+            { "scheme": "file" },
+            { "scheme": "content" },
+            { "mimeType": "application/pdf" },
+            { "mimeType": "application/msword" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+            { "mimeType": "application/vnd.ms-excel" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+            { "mimeType": "application/vnd.ms-powerpoint" },
+            { "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+            { "mimeType": "text/plain" },
+            { "mimeType": "text/csv" },
             { "mimeType": "*/*" }
           ]
         }
@@ -77,7 +104,35 @@
         {
           "iCloudContainerEnvironment": "Production"
         }
+      ],
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsFileWithMaxCount": 1
+          },
+          "androidIntentFilters": [
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "text/*",
+            "image/*"
+          ],
+          "androidMultiIntentFilters": [
+            "application/pdf",
+            "application/*"
+          ]
+        }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "fff910c3-9e73-4353-b89f-948f565be724"
+      }
+    }
   }
 }
